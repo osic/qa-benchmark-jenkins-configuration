@@ -1,0 +1,145 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<project>
+  <actions/>
+  <description></description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.StringParameterDefinition>
+          <name>IP</name>
+          <description></description>
+          <defaultValue></defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>NAME</name>
+          <description></description>
+          <defaultValue></defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>USER</name>
+          <description></description>
+          <defaultValue>admin</defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.PasswordParameterDefinition>
+          <name>PASSWORD</name>
+          <description></description>
+          <defaultValue>yJW0rkVWFAvQx0HZgPEk4rJF2ht7Mn//qpnYNPV0KEQ=</defaultValue>
+        </hudson.model.PasswordParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>TENANT</name>
+          <description></description>
+          <defaultValue>demo</defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>RALLY_IP</name>
+          <description></description>
+          <defaultValue>23.253.230.71</defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>RALLY_USER</name>
+          <description></description>
+          <defaultValue>rally</defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>RALLY_TASK</name>
+          <description></description>
+          <defaultValue>daryl.json</defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>RALLY_PARMS</name>
+          <description></description>
+          <defaultValue></defaultValue>
+        </hudson.model.StringParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <scm class="hudson.plugins.git.GitSCM" plugin="git@2.5.3">
+    <configVersion>2</configVersion>
+    <userRemoteConfigs>
+      <hudson.plugins.git.UserRemoteConfig>
+        <url>https://github.com/osic/rally-scenarios</url>
+      </hudson.plugins.git.UserRemoteConfig>
+    </userRemoteConfigs>
+    <branches>
+      <hudson.plugins.git.BranchSpec>
+        <name>*/master</name>
+      </hudson.plugins.git.BranchSpec>
+    </branches>
+    <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+    <submoduleCfg class="list"/>
+    <extensions/>
+  </scm>
+  <canRoam>true</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>#!/bin/bash
+
+source $JENKINS_HOME/rally.sh
+
+# first update the rally files in our workspace
+sed -i &quot;s/{{IP}}/$IP/g&quot;                   $WORKSPACE/existing.json
+sed -i &quot;s/{{USER}}/$USER/g&quot;               $WORKSPACE/existing.json
+sed -i &quot;s/{{PASSWORD}}/$PASSWORD/g&quot;       $WORKSPACE/existing.json
+sed -i &quot;s/{{TENANT}}/$TENANT/g&quot;           $WORKSPACE/existing.json
+sed -i &quot;s|{{RALLY_TASK}}|$RALLY_TASK|g&quot;   $WORKSPACE/run_rally.sh
+sed -i &quot;s|{{RALLY_PARMS}}|$RALLY_PARMS|g&quot; $WORKSPACE/run_rally.sh
+
+# next send them up to the rally box
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $WORKSPACE/existing.json $RALLY_USER@$RALLY_IP:/home/rally/
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $WORKSPACE/run_rally.sh $RALLY_USER@$RALLY_IP:/home/rally/
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $WORKSPACE/$RALLY_TASK $RALLY_USER@$RALLY_IP:/home/rally/
+
+# run the script - this runs the tests themselves
+ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $RALLY_USER@$RALLY_IP &quot;chmod +x run_rally.sh; ./run_rally.sh &gt; out 2&gt; err&quot; 
+
+# get the result files and put them into our workspace
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $RALLY_USER@$RALLY_IP:/home/rally/results.json $WORKSPACE/
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $RALLY_USER@$RALLY_IP:/home/rally/results.html $WORKSPACE/
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $RALLY_USER@$RALLY_IP:/home/rally/results.xml $WORKSPACE/
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $RALLY_USER@$RALLY_IP:/home/rally/rally-console.out $WORKSPACE/
+
+# delete any leftover logs from previous runs
+for file in `ls logs.*` ; do
+    if [ -f $file ] ; then
+        rm $file
+    fi
+done
+
+# get the logs from openstack &amp; rally compressed
+ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root@$IP &apos;tar -chf logs.tar `find /opt/stack/new/ | egrep *.log$`&apos;
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root@$IP:logs.tar .
+tar -rf logs.tar $WORKSPACE/results.json
+tar -rf logs.tar $WORKSPACE/rally-console.out
+gzip logs.tar
+
+# upload logs to files
+file_name=&quot;rally_all_&quot;$(date +&quot;%Y-%m-%d_%H-%M-%S&quot;)&quot;.tar.gz&quot;
+rack files object upload --container logs --name $file_name --file logs.tar.gz --delete-after 2592000
+temp_url=$(python temp_url.py $file_name)
+echo $temp_url
+
+# parse the logs and upload them to ElasticSearch
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $WORKSPACE/results.json root@104.239.149.33:~
+ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root@104.239.149.33 &quot;cat results.json | elastic-benchmark -e devstack -l $temp_url&quot;
+</command>
+    </hudson.tasks.Shell>
+  </builders>
+  <publishers>
+    <hudson.tasks.BuildTrigger>
+      <childProjects>Rally-Delete-Server</childProjects>
+      <threshold>
+        <name>FAILURE</name>
+        <ordinal>2</ordinal>
+        <color>RED</color>
+        <completeBuild>true</completeBuild>
+      </threshold>
+    </hudson.tasks.BuildTrigger>
+  </publishers>
+  <buildWrappers/>
+</project>

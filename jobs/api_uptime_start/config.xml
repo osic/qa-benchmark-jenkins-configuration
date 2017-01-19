@@ -1,0 +1,111 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<project>
+  <actions/>
+  <description></description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.StringParameterDefinition>
+          <name>IP</name>
+          <description>Host name of the target cloud&apos;s keystone server.</description>
+          <defaultValue></defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>USER</name>
+          <description>userid for authenticating to the target cloud</description>
+          <defaultValue>admin</defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>PASSWORD</name>
+          <description>password for authenticating to the target cloud</description>
+          <defaultValue>password</defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>TENANT</name>
+          <description>tenant for authenticating to the target cloud</description>
+          <defaultValue>demo</defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>SERVICES</name>
+          <description>comma-deliminted list of services which will be ping&apos;ed.  Currently supported services are:
+
+cinder, nova, glance, neutron, swift</description>
+          <defaultValue>nova</defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>DAEMON_FILE</name>
+          <description>Filename which, when present in the workspace, will stop this job from executing.  Note that the api_uptime_stop job currently has the full path to this file - if this name or path gets changed then the api_uptime_stop job also needs to be changed.</description>
+          <defaultValue>$WORKSPACE/stop</defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>OUTPUT_FILE</name>
+          <description>File which will contain the results from the job</description>
+          <defaultValue>$JENKINS_HOME/api_uptime_results.json</defaultValue>
+        </hudson.model.StringParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <scm class="hudson.plugins.git.GitSCM" plugin="git@2.5.3">
+    <configVersion>2</configVersion>
+    <userRemoteConfigs>
+      <hudson.plugins.git.UserRemoteConfig>
+        <url>https://github.com/osic/api_uptime</url>
+      </hudson.plugins.git.UserRemoteConfig>
+    </userRemoteConfigs>
+    <branches>
+      <hudson.plugins.git.BranchSpec>
+        <name>*/master</name>
+      </hudson.plugins.git.BranchSpec>
+    </branches>
+    <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+    <submoduleCfg class="list"/>
+    <extensions/>
+  </scm>
+  <canRoam>true</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>echo &quot;Building configuration&quot;
+
+export CONFIG_FILE=$WORKSPACE/os.cnf
+sed -i &quot;s|{{IP}}|$IP|g&quot; $CONFIG_FILE
+sed -i &quot;s|{{USER}}|$USER|g&quot; $CONFIG_FILE
+sed -i &quot;s|{{PASSWORD}}|$PASSWORD|g&quot; $CONFIG_FILE
+sed -i &quot;s|{{TENANT}}|$TENANT|g&quot; $CONFIG_FILE
+sed -i &quot;s|{{SERVICES}}|$SERVICES|g&quot; $CONFIG_FILE
+sed -i &quot;s|{{DAEMON_FILE}}|$DAEMON_FILE|g&quot; $CONFIG_FILE
+sed -i &quot;s|{{OUTPUT_FILE}}|$OUTPUT_FILE|g&quot; $CONFIG_FILE
+
+echo &quot;Set up the python virtualenv&quot;
+cd $WORKSPACE
+cd /var/lib/jenkins/.virtualenvs/api_uptime
+. bin/activate
+python --version
+which python
+
+echo &quot;Set up pre-reqs&quot;
+cd $WORKSPACE
+pip install -r requirements.txt
+
+echo &quot;Starting the daemon&quot;
+cd $WORKSPACE
+python api_uptime/call_test.py -d -c $CONFIG_FILE
+echo &quot;Daemon started&quot;
+
+</command>
+    </hudson.tasks.Shell>
+  </builders>
+  <publishers/>
+  <buildWrappers>
+    <hudson.plugins.ws__cleanup.PreBuildCleanup plugin="ws-cleanup@0.30">
+      <deleteDirs>false</deleteDirs>
+      <cleanupParameter></cleanupParameter>
+      <externalDelete></externalDelete>
+    </hudson.plugins.ws__cleanup.PreBuildCleanup>
+  </buildWrappers>
+</project>

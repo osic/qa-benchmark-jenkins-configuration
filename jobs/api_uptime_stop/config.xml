@@ -1,0 +1,23 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<project>
+  <actions/>
+  <description></description>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <scm class="hudson.scm.NullSCM"/>
+  <canRoam>true</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders>
+    <com.etas.jenkins.plugins.CreateTextFile.CreateFileBuilder plugin="text-file-operations@1.3.2">
+      <textFilePath>${WORKSPACE}/../../api_uptime_start/workspace/stop</textFilePath>
+      <textFileContent>STOP</textFileContent>
+      <useWorkspace>false</useWorkspace>
+    </com.etas.jenkins.plugins.CreateTextFile.CreateFileBuilder>
+  </builders>
+  <publishers/>
+  <buildWrappers/>
+</project>

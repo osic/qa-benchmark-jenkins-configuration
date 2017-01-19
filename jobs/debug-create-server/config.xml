@@ -1,0 +1,101 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<project>
+  <actions/>
+  <description></description>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <scm class="hudson.scm.NullSCM"/>
+  <canRoam>true</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>#!/bin/bash
+name=DBG$(uuidgen)
+wget https://raw.github.com/arithx/shstack/master/user_data.yml
+
+echo &quot;Initial Name: $name&quot;
+
+# Give RAX 3 tries to dodge build / cloud-init failures
+while [[ &quot;$count&quot; -lt 3 ]] ; do
+    ((++count))
+    echo &quot;Try #$count&quot;
+
+    # Create the server and wait until it&apos;s status is ACTIVE or ERROR
+    rack servers instance create --name &quot;$name&quot; --flavor-id &quot;performance1-8&quot; --image-name &quot;Ubuntu 14.04 LTS (Trusty Tahr) (PVHVM)&quot; --keypair &quot;devstack-ci&quot; --user-data user_data.yml &amp;&gt; /dev/null
+    time_determining_status=0
+    status=&quot;&quot;
+    while [[ &quot;$status&quot; != &quot;ACTIVE&quot; &amp;&amp; &quot;$status&quot; != &quot;ERROR&quot; ]]; do
+        status=&quot;$(rack servers instance get --name &quot;$name&quot; | grep &quot;Status.*&quot; | awk &apos;{print $2}&apos;)&quot;
+        ((++time_determining_status))
+        sleep 1
+        if ! ((time_determining_status % 60)); then
+            echo &quot;Server has been building for $(((time_determining_status / 60))) minutes.&quot;
+        fi
+        if [ &quot;$time_determining_status&quot; -gt 300 ] ; then
+            break
+        fi
+    done
+
+    echo &quot;Status: $status after $time_determining_status seconds.&quot;
+
+    if [ &quot;$status&quot; = &quot;ACTIVE&quot; ] ; then
+        # Give it 15 seconds after going active to make sure that the IPv4 is set
+        sleep 15
+        rack servers instance get --name &quot;$name&quot;
+        SERVER=$(rack servers instance get --name &quot;$name&quot; | grep &quot;PublicIPv4.*&quot; | awk &apos;{print $2}&apos;)
+
+        # Check the cloud-init-output.log to make sure that it hasn&apos;t hung on a single action for 4 minutes (this will need testing)
+        echo &quot;Beggining cloud-init monitoring&quot;
+        same_count=0
+        while :; do
+            sleep 60
+            tmp_last_line=$(ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root@$SERVER tail -1 /var/log/cloud-init-output.log 2&gt; /dev/null)
+            if [ &quot;$last_line&quot; = &quot;$tmp_last_line&quot; ] ; then
+                ((++same_count))
+                echo &quot;cloud-init log has been the same for $same_count minutes.&quot;
+                if [ &quot;$same_count&quot; -ge 4 ] ; then
+                    echo &quot;cloud-init seems to have died.&quot;
+                    echo &quot;Last new cloud-init line: $last_line&quot;
+                    break
+                fi
+            else
+                # Break if Cloud-init &amp; finished are in the last line received
+                if [ ! -z  &quot;$(echo $tmp_last_line | egrep &quot;Cloud-init&quot; | egrep &quot;finished&quot;)&quot; ] ; then
+                    echo &quot;Last cloud-init line detected: $tmp_last_line&quot;
+                    echo NAME=$name$&apos;\n&apos;IP=$SERVER &gt; $JENKINS_HOME/rally.sh
+                    exit 0
+                fi
+                same_count=0
+                last_line=$tmp_last_line
+            fi
+        done
+    fi
+
+    # Failure case (either an ERROR state or failed cloud-init), delete and try again
+    rack servers instance delete --name &quot;$name&quot;
+    name=DBG$(uuidgen)
+    echo &quot;Deleting the server and trying again under name $name.&quot;
+done
+
+if [ &quot;$count&quot; -eq 3 ] ; then
+    exit 1
+fi</command>
+    </hudson.tasks.Shell>
+  </builders>
+  <publishers>
+    <hudson.tasks.BuildTrigger>
+      <childProjects>debug-run-nova-tests</childProjects>
+      <threshold>
+        <name>SUCCESS</name>
+        <ordinal>0</ordinal>
+        <color>BLUE</color>
+        <completeBuild>true</completeBuild>
+      </threshold>
+    </hudson.tasks.BuildTrigger>
+  </publishers>
+  <buildWrappers/>
+</project>

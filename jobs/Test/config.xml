@@ -1,0 +1,124 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job@2.5">
+  <actions/>
+  <description></description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+      <triggers/>
+    </org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2.12">
+    <script>#!/usr/bin/env groovy
+
+def osa, common
+String home = &apos;/var/lib/jenkins/&apos;
+String onmetal_ip
+
+
+// *******************************
+stage &apos;Pre-Deployment&apos;
+// *******************************
+
+echo &apos;Provisioning an onMetal server and preparing it to run OSA&apos;
+node(&apos;master&apos;) {
+    
+    // Copy the Rax key from the Jenkins master
+    dir(&apos;/var/lib/jenkins&apos;) {
+        stash includes: &apos;.raxpub&apos;, name: &apos;raxpub&apos;
+    }
+
+    // Load the external functions using master since the git command
+    // might not be available at the agent yet
+    fileLoader.withGit(&apos;https://github.com/osic/qa-jenkins-onmetal.git&apos;, &apos;master&apos;, null, &apos;&apos;) {
+        common = fileLoader.load(&apos;jenkins/common.groovy&apos;);
+        osa = fileLoader.load(&apos;jenkins/osa_onmetal.functions.groovy&apos;);
+    }
+
+    // Download the project repository and paste the Rax key
+    sh &quot;&quot;&quot;
+    rm -rf ${home}
+    git clone https://github.com/osic/qa-jenkins-onmetal.git ${home}
+    &quot;&quot;&quot;
+    dir(&quot;${home}&quot;) {
+        unstash &apos;raxpub&apos;
+    }
+    
+    // Provision the onMetal host
+    onmetal_ip = osa.onmetal_provision(home)
+
+    // Provision the VMs in the onMetal host
+    osa.vm_provision(home)
+
+    // Prepare the VMs to run OpenStack
+    osa.vm_preparation_for_osa(home)
+
+}
+
+
+// *******************************
+stage &apos;Deployment&apos;
+// *******************************
+
+echo &apos;Deploying OpenStack using OSA&apos;
+node(&apos;master&apos;) {
+
+    // Deploy OpenStack with OSA
+    osa.deploy_openstack(home)
+    
+    // Install and configure Tempest on the onMetal host
+    osa.configure_tempest(onmetal_ip)
+    
+}
+
+
+// *******************************
+stage &apos;Post-Deployment Validation&apos;
+// *******************************
+
+echo &apos;Validating the OpenStack deployment&apos;
+node(&apos;master&apos;) {
+
+    // Run the tempest tests
+    osa.run_tempest_smoke_tests(onmetal_ip)
+
+}
+
+
+// *******************************
+stage &apos;Upgrade&apos;
+// *******************************
+echo &apos;To be defined...&apos;
+
+
+// *******************************
+stage &apos;Post-Upgrade Validation&apos;
+// *******************************
+echo &apos;To be defined...&apos;
+
+
+// *******************************
+stage &apos;Reporting&apos;
+// *******************************
+echo &apos;To be defined&apos;
+
+
+// *******************************
+stage &apos;Clean Up&apos;
+// *******************************
+
+echo &apos;Deleting the onMetal host and its VMs&apos;
+node(&apos;master&apos;) {
+
+    // Delete VMs
+    osa.delete_virtual_resources(home)
+    
+    // Delete the onMetal host
+    osa.delete_onmetal(home, onmetal_ip)
+
+}
+</script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+</flow-definition>

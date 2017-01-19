@@ -1,0 +1,134 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<project>
+  <actions/>
+  <description></description>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <scm class="hudson.scm.NullSCM"/>
+  <canRoam>true</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>#!/bin/bash
+
+# Rally Stuff
+rm $JENKINS_HOME/.ssh/known_hosts
+rm $WORKSPACE/logs.tar
+rm $WORKSPACE/logs.tar.gz
+rm $WORKSPACE/results.json
+rm $WORKSPACE/results.html
+rm $WORKSPACE/results.xml
+rm $WORKSPACE/rally-console.out
+rm $WORKSPACE/existing.json
+rm $WORKSPACE/run_rally.sh
+wget https://raw.githubusercontent.com/osic/rally/master/run_rally.sh
+wget https://raw.githubusercontent.com/osic/rally/master/existing.json
+
+# Confirmed
+ansible-playbook build_onmetal.yaml --tags &apos;iad&apos;
+
+# Confirmed
+ansible-playbook -i hosts get_onmetal_facts.yaml --tags &apos;iad&apos;
+
+# Confirmed
+ansible-playbook -i hosts prepare_onmetal.yaml
+
+# Confirmed
+ansible-playbook -i hosts set_onmetal_cpu.yaml
+
+# Confirmed
+ansible-playbook -i hosts configure_onmetal.yaml
+
+# Confirmed
+ansible-playbook -i hosts create_lab.yaml
+
+# Confirmed
+ansible-playbook -i hosts prepare_for_osa.yaml
+
+# Confirmed
+ansible-playbook -i hosts deploy_osa.yaml
+
+# Set Variables (some hardcoded for now)
+IP=`cat hosts | cut -d &quot;=&quot; -f 2`
+USER=&apos;admin&apos;
+PASSWORD=&apos;openstack&apos;
+TENANT=&apos;demo&apos;
+RALLY_TASK=&apos;daryl.json&apos;
+RALLY_PARAMS=&apos;&apos;
+
+# first update the rally files in our workspace
+sed -i &quot;s/{{IP}}/$IP/g&quot;                   $WORKSPACE/existing.json
+sed -i &quot;s/{{USER}}/$USER/g&quot;               $WORKSPACE/existing.json
+sed -i &quot;s/{{PASSWORD}}/$PASSWORD/g&quot;       $WORKSPACE/existing.json
+sed -i &quot;s/{{TENANT}}/$TENANT/g&quot;           $WORKSPACE/existing.json
+sed -i &quot;s|{{RALLY_TASK}}|$RALLY_TASK|g&quot;   $WORKSPACE/run_rally.sh
+sed -i &quot;s|{{RALLY_PARMS}}|$RALLY_PARMS|g&quot; $WORKSPACE/run_rally.sh
+
+# run the script - this runs the tests themselves
+ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $RALLY_USER@$RALLY_IP &quot;chmod +x run_rally.sh; ./run_rally.sh &gt; out 2&gt; err&quot; 
+
+# get the result files and put them into our workspace
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $RALLY_USER@$RALLY_IP:/home/rally/results.json $WORKSPACE/
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $RALLY_USER@$RALLY_IP:/home/rally/results.html $WORKSPACE/
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $RALLY_USER@$RALLY_IP:/home/rally/results.xml $WORKSPACE/
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $RALLY_USER@$RALLY_IP:/home/rally/rally-console.out $WORKSPACE/
+
+# delete any leftover logs from previous runs
+for file in `ls logs.*` ; do
+    if [ -f $file ] ; then
+        rm $file
+    fi
+done
+
+# Extract Stream &amp; Logs
+ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root@$IP &apos;&apos;&apos;
+mkdir logs/
+for line in $(virsh list --name); do
+mkdir logs/$line
+scp -r $line:/openstack/log/* logs/$line/
+done
+
+tar -cvf logs.tar logs
+&apos;&apos;&apos;
+scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root@$IP:~/logs.tar ./
+tar -rf logs.tar $WORKSPACE/results.json
+tar -rf logs.tar $WORKSPACE/rally-console.out
+gzip logs.tar
+
+# Upload Logs
+file_name=&quot;onmetal_build_&quot;$(date +&quot;%Y-%m-%d_%H-%M-%S&quot;)&quot;.tar.gz&quot;
+rack files object upload --container logs --name $file_name --file logs.tar.gz --delete-after 2592000
+temp_url=$(python temp_url.py $file_name)
+echo $temp_url</command>
+    </hudson.tasks.Shell>
+  </builders>
+  <publishers>
+    <org.jenkinsci.plugins.postbuildscript.PostBuildScript plugin="postbuildscript@0.17">
+      <genericScriptFileList>
+        <org.jenkinsci.plugins.postbuildscript.GenericScript>
+          <filePath></filePath>
+        </org.jenkinsci.plugins.postbuildscript.GenericScript>
+      </genericScriptFileList>
+      <buildSteps>
+        <hudson.tasks.Shell>
+          <command>rack servers instance delete --name &quot;osic-qa-build-iad1&quot;</command>
+        </hudson.tasks.Shell>
+      </buildSteps>
+      <scriptOnlyIfSuccess>false</scriptOnlyIfSuccess>
+      <scriptOnlyIfFailure>false</scriptOnlyIfFailure>
+      <markBuildUnstable>false</markBuildUnstable>
+    </org.jenkinsci.plugins.postbuildscript.PostBuildScript>
+  </publishers>
+  <buildWrappers>
+    <hudson.plugins.build__timeout.BuildTimeoutWrapper plugin="build-timeout@1.17.1">
+      <strategy class="hudson.plugins.build_timeout.impl.AbsoluteTimeOutStrategy">
+        <timeoutMinutes>240</timeoutMinutes>
+      </strategy>
+      <operationList/>
+    </hudson.plugins.build__timeout.BuildTimeoutWrapper>
+  </buildWrappers>
+</project>
